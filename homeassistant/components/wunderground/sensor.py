@@ -22,8 +22,10 @@ from homeassistant.const import (
     LENGTH_FEET,
     LENGTH_INCHES,
     LENGTH_KILOMETERS,
+    LENGTH_METERS,
     LENGTH_MILES,
-    LENGTH_MILLIMETERS,
+    #LENGTH_MILLIMETERS,
+    #LIGHT_LUX,
     PERCENTAGE,
     PRESSURE_INHG,
     SPEED_KILOMETERS_PER_HOUR,
@@ -38,7 +40,14 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.typing import ConfigType, HomeAssistantType
 from homeassistant.util import Throttle
 
-_RESOURCE = "http://api.wunderground.com/api/{}/{}/{}/q/"
+# get current weather data from weather stations
+# https://api.weather.com/v2/pws/observations/current?stationId=INOORDHO94&format=json&units=m&apiKey=deadbeefcafeaffedeadbeefcafeaffe&numericPrecision=decimal
+
+# get forecast
+#https://api.weather.com/v3/wx/forecast/daily/5day?geocode=52.37,4.90&format=json&units=m&language=en-US&apiKey=deadbeefcafeaffedeadbeefcafeaffe
+
+_LINK_OBSERVATION = "https://api.weather.com/v2/pws/observations/current?stationId={}&format=json&units=m&apiKey={}&numericPrecision=decimal"
+_LINK_FORECAST = "https://api.weather.com/v3/wx/forecast/daily/5day?geocode={}&format=json&units=m&language={}&apiKey={}"
 _LOGGER = logging.getLogger(__name__)
 
 ATTRIBUTION = "Data provided by the WUnderground weather service"
@@ -46,7 +55,7 @@ ATTRIBUTION = "Data provided by the WUnderground weather service"
 CONF_PWS_ID = "pws_id"
 CONF_LANG = "lang"
 
-DEFAULT_LANG = "EN"
+DEFAULT_LANG = "en-US"
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=5)
 
@@ -108,21 +117,19 @@ class WUCurrentConditionsSensorConfig(WUSensorConfig):
         """Initialize current conditions sensor configuration.
 
         :param friendly_name: Friendly name of sensor
-        :field: Field name in the "current_observation" dictionary.
+        :field: Field name in the "observation->metric" dictionary.
         :icon: icon name or URL, if None sensor will use current weather symbol
         :unit_of_measurement: unit of measurement
         """
         super().__init__(
             friendly_name,
             "conditions",
-            value=lambda wu: wu.data["current_observation"][field],
+            value=lambda wu: wu.data["observations"][0]["metric"][field],
             icon=icon,
             unit_of_measurement=unit_of_measurement,
-            entity_picture=lambda wu: wu.data["current_observation"]["icon_url"]
-            if icon is None
-            else None,
+            entity_picture=None,
             device_state_attributes={
-                "date": lambda wu: wu.data["current_observation"]["observation_time"]
+                "date": lambda wu: wu.data["observations"][0]["obsTimeLocal"]
             },
             device_class=device_class,
         )
@@ -345,7 +352,7 @@ class WUAlertsSensorConfig(WUSensorConfig):
 SENSOR_TYPES = {
     "alerts": WUAlertsSensorConfig("Alerts"),
     "dewpoint_c": WUCurrentConditionsSensorConfig(
-        "Dewpoint", "dewpoint_c", "mdi:water", TEMP_CELSIUS
+        "Dewpoint", "dewpt", "mdi:water", TEMP_CELSIUS
     ),
     "dewpoint_f": WUCurrentConditionsSensorConfig(
         "Dewpoint", "dewpoint_f", "mdi:water", TEMP_FAHRENHEIT
@@ -363,7 +370,7 @@ SENSOR_TYPES = {
         "Feels Like", "feelslike_string", "mdi:thermometer"
     ),
     "heat_index_c": WUCurrentConditionsSensorConfig(
-        "Heat index", "heat_index_c", "mdi:thermometer", TEMP_CELSIUS
+        "Heat index", "heatIndex", "mdi:thermometer", TEMP_CELSIUS
     ),
     "heat_index_f": WUCurrentConditionsSensorConfig(
         "Heat index", "heat_index_f", "mdi:thermometer", TEMP_FAHRENHEIT
@@ -371,38 +378,40 @@ SENSOR_TYPES = {
     "heat_index_string": WUCurrentConditionsSensorConfig(
         "Heat Index Summary", "heat_index_string", "mdi:thermometer"
     ),
-    "elevation": WUSensorConfig(
-        "Elevation",
-        "conditions",
-        value=lambda wu: wu.data["current_observation"]["observation_location"][
-            "elevation"
-        ].split()[0],
-        unit_of_measurement=LENGTH_FEET,
-        icon="mdi:elevation-rise",
+    "elevation": WUCurrentConditionsSensorConfig(
+        "Elevation", "elev", "mdi:elevation-rise", LENGTH_METERS
     ),
     "location": WUSensorConfig(
         "Location",
         "conditions",
-        value=lambda wu: wu.data["current_observation"]["display_location"]["full"],
+        value=lambda wu: (wu.data["observations"][0]["lat"],
+                          wu.data["observations"][0]["lon"]
+                         ),
         icon="mdi:map-marker",
     ),
-    "observation_time": WUCurrentConditionsSensorConfig(
-        "Observation Time", "observation_time", "mdi:clock"
+    "observation_time": WUSensorConfig(
+        "Observation Time", 
+        "conditions",
+        value=lambda wu: wu.data["observations"][0]["obsTimeLocal"],
+        icon="mdi:clock"
     ),
     "precip_1hr_in": WUCurrentConditionsSensorConfig(
         "Precipitation 1hr", "precip_1hr_in", "mdi:umbrella", LENGTH_INCHES
     ),
     "precip_1hr_metric": WUCurrentConditionsSensorConfig(
-        "Precipitation 1hr", "precip_1hr_metric", "mdi:umbrella", LENGTH_MILLIMETERS
+        "Precipitation 1hr", "precip_1hr_metric", "mdi:umbrella", "mm"
     ),
     "precip_1hr_string": WUCurrentConditionsSensorConfig(
         "Precipitation 1hr", "precip_1hr_string", "mdi:umbrella"
+    ),
+    "precip_rate": WUCurrentConditionsSensorConfig(
+        "Precipitation Rate", "precipRate", "mdi:umbrella"
     ),
     "precip_today_in": WUCurrentConditionsSensorConfig(
         "Precipitation Today", "precip_today_in", "mdi:umbrella", LENGTH_INCHES
     ),
     "precip_today_metric": WUCurrentConditionsSensorConfig(
-        "Precipitation Today", "precip_today_metric", "mdi:umbrella", LENGTH_MILLIMETERS
+        "Precipitation Today", "precipTotal", "mdi:umbrella", "mm"
     ),
     "precip_today_string": WUCurrentConditionsSensorConfig(
         "Precipitation Today", "precip_today_string", "mdi:umbrella"
@@ -411,7 +420,7 @@ SENSOR_TYPES = {
         "Pressure", "pressure_in", "mdi:gauge", PRESSURE_INHG, device_class="pressure"
     ),
     "pressure_mb": WUCurrentConditionsSensorConfig(
-        "Pressure", "pressure_mb", "mdi:gauge", "mb", device_class="pressure"
+        "Pressure", "pressure", "mdi:gauge", "mb", device_class="pressure"
     ),
     "pressure_trend": WUCurrentConditionsSensorConfig(
         "Pressure Trend", "pressure_trend", "mdi:gauge", device_class="pressure"
@@ -419,26 +428,31 @@ SENSOR_TYPES = {
     "relative_humidity": WUSensorConfig(
         "Relative Humidity",
         "conditions",
-        value=lambda wu: int(wu.data["current_observation"]["relative_humidity"][:-1]),
+        value=lambda wu: int(wu.data["observations"][0]["humidity"]),
         unit_of_measurement=PERCENTAGE,
         icon="mdi:water-percent",
         device_class="humidity",
     ),
-    "station_id": WUCurrentConditionsSensorConfig(
-        "Station ID", "station_id", "mdi:home"
+    "station_id": WUSensorConfig(
+        "Station ID",
+        "conditions",
+        value=lambda wu: str(wu.data["observations"][0]["stationID"]),
+        icon="mdi:home",
     ),
-    "solarradiation": WUCurrentConditionsSensorConfig(
+    "solarradiation": WUSensorConfig(
         "Solar Radiation",
-        "solarradiation",
-        "mdi:weather-sunny",
-        IRRADIATION_WATTS_PER_SQUARE_METER,
+        "conditions",
+        value=lambda wu: float(wu.data["observations"][0]["solarRadiation"]),
+        unit_of_measurement="lx",
+        icon="mdi:weather-sunny",
+        device_class="illuminance",
     ),
     "temperature_string": WUCurrentConditionsSensorConfig(
         "Temperature Summary", "temperature_string", "mdi:thermometer"
     ),
     "temp_c": WUCurrentConditionsSensorConfig(
         "Temperature",
-        "temp_c",
+        "temp",
         "mdi:thermometer",
         TEMP_CELSIUS,
         device_class="temperature",
@@ -450,7 +464,12 @@ SENSOR_TYPES = {
         TEMP_FAHRENHEIT,
         device_class="temperature",
     ),
-    "UV": WUCurrentConditionsSensorConfig("UV", "UV", "mdi:sunglasses"),
+    "UV": WUSensorConfig(
+        "UV Index", 
+        "conditions",
+        value=lambda wu: float(wu.data["observations"][0]["uv"]),
+        icon="mdi:sunglasses"
+    ),
     "visibility_km": WUCurrentConditionsSensorConfig(
         "Visibility (km)", "visibility_km", "mdi:eye", LENGTH_KILOMETERS
     ),
@@ -458,20 +477,26 @@ SENSOR_TYPES = {
         "Visibility (miles)", "visibility_mi", "mdi:eye", LENGTH_MILES
     ),
     "weather": WUCurrentConditionsSensorConfig("Weather Summary", "weather", None),
+    "wind_chill": WUCurrentConditionsSensorConfig(
+        "Wind Chill", "windChill", "mdi:thermometer", TEMP_CELSIUS, device_class="temperature"
+    ),
     "wind_degrees": WUCurrentConditionsSensorConfig(
         "Wind Degrees", "wind_degrees", "mdi:weather-windy", DEGREE
     ),
-    "wind_dir": WUCurrentConditionsSensorConfig(
-        "Wind Direction", "wind_dir", "mdi:weather-windy"
+    "wind_dir": WUSensorConfig(
+        "Wind Direction",
+        "conditions",
+        value=lambda wu: wu.data["observations"][0]["winddir"],
+        icon="mdi:weather-windy"
     ),
     "wind_gust_kph": WUCurrentConditionsSensorConfig(
-        "Wind Gust", "wind_gust_kph", "mdi:weather-windy", SPEED_KILOMETERS_PER_HOUR
+        "Wind Gust", "windGust", "mdi:weather-windy", SPEED_KILOMETERS_PER_HOUR
     ),
     "wind_gust_mph": WUCurrentConditionsSensorConfig(
         "Wind Gust", "wind_gust_mph", "mdi:weather-windy", SPEED_MILES_PER_HOUR
     ),
     "wind_kph": WUCurrentConditionsSensorConfig(
-        "Wind Speed", "wind_kph", "mdi:weather-windy", SPEED_KILOMETERS_PER_HOUR
+        "Wind Speed", "windSpeed", "mdi:weather-windy", SPEED_KILOMETERS_PER_HOUR
     ),
     "wind_mph": WUCurrentConditionsSensorConfig(
         "Wind Speed", "wind_mph", "mdi:weather-windy", SPEED_MILES_PER_HOUR
@@ -883,32 +908,32 @@ SENSOR_TYPES = {
         "Precipitation Intensity Today",
         0,
         "qpf_allday",
-        LENGTH_MILLIMETERS,
-        LENGTH_MILLIMETERS,
+        "mm",
+        "mm",
         "mdi:umbrella",
     ),
     "precip_2d_mm": WUDailySimpleForecastSensorConfig(
         "Precipitation Intensity Tomorrow",
         1,
         "qpf_allday",
-        LENGTH_MILLIMETERS,
-        LENGTH_MILLIMETERS,
+        "mm",
+        "mm",
         "mdi:umbrella",
     ),
     "precip_3d_mm": WUDailySimpleForecastSensorConfig(
         "Precipitation Intensity in 3 Days",
         2,
         "qpf_allday",
-        LENGTH_MILLIMETERS,
-        LENGTH_MILLIMETERS,
+        "mm",
+        "mm",
         "mdi:umbrella",
     ),
     "precip_4d_mm": WUDailySimpleForecastSensorConfig(
         "Precipitation Intensity in 4 Days",
         3,
         "qpf_allday",
-        LENGTH_MILLIMETERS,
-        LENGTH_MILLIMETERS,
+        "mm",
+        "mm",
         "mdi:umbrella",
     ),
     "precip_1d_in": WUDailySimpleForecastSensorConfig(
@@ -1000,7 +1025,7 @@ LANG_CODES = [
     "DK",
     "DV",
     "NL",
-    "EN",
+    "en-US",
     "EO",
     "ET",
     "FA",
@@ -1240,10 +1265,16 @@ class WUndergroundData:
         self._hass = hass
         self._api_key = api_key
         self._pws_id = pws_id
-        self._lang = f"lang:{lang}"
+        self._lang = f"{lang}"
         self._latitude = latitude
         self._longitude = longitude
         self._features = set()
+        self._observation_url = _LINK_OBSERVATION.format(
+            self._pws_id, self._api_key
+        )
+        self._forecast_url = _LINK_FORECAST.format(
+            f"{self._latitude:.2f},{self._longitude:.2f}", self._lang, self._api_key
+        )
         self.data = None
         self._session = async_get_clientsession(self._hass)
 
@@ -1251,28 +1282,44 @@ class WUndergroundData:
         """Register feature to be fetched from WU API."""
         self._features.add(feature)
 
-    def _build_url(self, baseurl=_RESOURCE):
-        url = baseurl.format(
-            self._api_key, "/".join(sorted(self._features)), self._lang
-        )
-        if self._pws_id:
-            url = f"{url}pws:{self._pws_id}"
-        else:
-            url = f"{url}{self._latitude},{self._longitude}"
-
-        return f"{url}.json"
-
     @Throttle(MIN_TIME_BETWEEN_UPDATES)
     async def async_update(self):
         """Get the latest data from WUnderground."""
+        _LOGGER.debug("Check observation URL: %s", self._observation_url)
         try:
             with async_timeout.timeout(10):
-                response = await self._session.get(self._build_url())
-            result = await response.json()
-            if "error" in result["response"]:
-                raise ValueError(result["response"]["error"]["description"])
-            self.data = result
+                response = await self._session.get(self._observation_url)
+            result1 = await response.json()
+            if result1 is None:
+                raise ValueError
         except ValueError as err:
-            _LOGGER.error("Check WUnderground API %s", err.args)
+            _LOGGER.error("Check WUnderground observation API")
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.error("Error fetching WUnderground data: %s", repr(err))
+            _LOGGER.error("Error fetching WUnderground observation data: %s", repr(err))
+
+        if result1 is None:
+            return
+        
+        for i in range(len(result1["observations"])):
+            if result1["observations"][i]["stationID"] != self._pws_id:
+                del result1["observations"][i];
+
+        _LOGGER.debug("Result1 is now: %s", result1)
+        
+        _LOGGER.debug("Check observation URL: %s", self._forecast_url)
+        try:
+            with async_timeout.timeout(10):
+                response = await self._session.get(self._forecast_url)
+            result2 = await response.json()
+            if result2 is None:
+                raise ValueError
+        except ValueError as err:
+            _LOGGER.error("Check WUnderground forecast API")
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.error("Error fetching WUnderground forecast data: %s", repr(err))
+        
+        if result2 is None:
+            return
+        
+        self.data = {**result1, **result2}
+        _LOGGER.debug("Data is now: %s", self.data)
